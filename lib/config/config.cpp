@@ -39,7 +39,7 @@ int config_ROM_Address = 0;   //ROM address where Config will be stored from
 
 void clear_configuration()
 {
-    EEPROM.begin(512);
+    EEPROM.begin(1024);
     
     for(int i = 0; i < 512;i++)
     {
@@ -51,7 +51,7 @@ void clear_configuration()
 
 void save_config_settings()
 {
-    EEPROM.begin(512);
+    EEPROM.begin(1024);
     EEPROM.put(config_ROM_Address, sensor_config);
     EEPROM.commit();
     EEPROM.end();
@@ -59,7 +59,7 @@ void save_config_settings()
 
 void get_config_settings()
 {
-    EEPROM.begin(512);
+    EEPROM.begin(1024);
     EEPROM.get(config_ROM_Address,sensor_config);
     EEPROM.end();
 }
@@ -81,6 +81,16 @@ void print_config()
     Serial.println(sensor_config.id);
     Serial.print("Connection SSID : ");
     Serial.println(sensor_config.connect_ap_info.SSID);
+    Serial.print("Operation Mode : ");
+    if(sensor_config.operation_mode == OPERATION_DETECTION_MODE)
+    {
+        Serial.println("Detection Mode");
+    }
+    else if(sensor_config.operation_mode == OPERATION_PROTECTION_MODE)
+    {
+        Serial.println("Protection Mode");
+    }
+
     Serial.print("Alert Mode : ");
     switch(sensor_config.alert_mode)
     {
@@ -88,10 +98,19 @@ void print_config()
             Serial.println("StandAlone Mode");
             Serial.print("IFTTT KEY : ");
             Serial.println(sensor_config.ifttt_info.ifttt_key);
-            Serial.print("IFTTT Deauthentication Event Name : ");
-            Serial.println(sensor_config.ifttt_info.ifttt_eventName_deauth);
-            Serial.print("IFTTT Evil Twin Event Name : ");
-            Serial.println(sensor_config.ifttt_info.ifttt_eventName_eviltwin);
+            if(sensor_config.operation_mode == OPERATION_DETECTION_MODE)
+            {
+                Serial.print("IFTTT Deauthentication Event Name : ");
+                Serial.println(sensor_config.ifttt_info.ifttt_eventName_deauth);
+                Serial.print("IFTTT Evil Twin Event Name : ");
+                Serial.println(sensor_config.ifttt_info.ifttt_eventName_eviltwin);
+            }
+            else if(sensor_config.operation_mode == OPERATION_PROTECTION_MODE)
+            {
+                Serial.print("IFTTT GeoFencing Event Name : ");
+                Serial.println(sensor_config.ifttt_info.ifttt_eventName_geofence);
+            }
+            
         break;
 
         case ALERT_WIFI_SERVER: 
@@ -149,7 +168,8 @@ void config_sensor_manually()
     bool ssid_len_in_limit = false;
     bool bssid_len_in_limit = false;
     bool confirm_setting = false;
-    uint8_t cho = 0;
+    uint8_t cho = -1;
+    uint8_t alert_mode = 0, operation_mode = 0;
     bool id_set = false;
     bool alert_mode_set = false;
     bool alert_nrf_mode_selected  = false;
@@ -158,6 +178,8 @@ void config_sensor_manually()
     bool ifttt_key_set = false;
     bool ifttt_event_set = false;
     bool server_ip_set = false;
+    bool operation_mode_detection_set = false;
+    bool operation_mode_protection_set = false;
 
     while(!confirm_setting)
     {
@@ -170,11 +192,17 @@ void config_sensor_manually()
         
         msg = "Enter BSSID ( MAC ) of Access Point to protect ( eg 00:11:22:33:44:55) : ";
         tmp_str = get_string_input(msg,MAC_LEN_FMT+1,MAC_LEN_FMT+1);
+
         // Temp
         tmp_str.toLowerCase();
         tmp_str.toCharArray(sensor_config.protect_ap_info.BSSID_lower,tmp_str.length() -1 ); 
         tmp_str.toUpperCase();
         tmp_str.toCharArray(sensor_config.protect_ap_info.BSSID_upper,tmp_str.length() -1 ); 
+
+        // Type of WiFi network to protect
+        msg = "Enter Type Of Wifi Network To Protect OPEN/ENCRYPTED : ";
+        tmp_str = get_string_input(msg,4,MAX_NETWORK_TYPE_LEN);
+        tmp_str.toCharArray(sensor_config.protect_ap_info.NETWORK_type,tmp_str.length()-1);
 
         msg = "Enter WIFI SSID : ";
         tmp_str = get_string_input(msg,1,MAX_SSID_LEN);
@@ -187,21 +215,36 @@ void config_sensor_manually()
 
         while(!alert_mode_set)
         {
+            msg = "Select ANWI operation mode \n 1) Detection Mode \n 2) Protection Mode";// \n 3) Standalone Radio Mode";
+            operation_mode = get_int_input(msg,0,2);
+            sensor_config.operation_mode = operation_mode;
+
             msg = "Select sensor alert mode \n 1) Standalone Mode (IFTTT) \n 2) Wifi Server Mode";// \n 3) Standalone Radio Mode";
-            cho = get_int_input(msg,0,3);
-            switch (cho)
+            alert_mode = get_int_input(msg,0,3);
+
+            switch (alert_mode)
             {
                 case 1:
                     msg= "Enter IFTTT key : ";
                     tmp_str = get_string_input(msg,1,100);
                     tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_key,tmp_str.length()-1); 
-                    msg = "Enter IFTTT event name for Evil Twin: ";
-                    tmp_str = get_string_input(msg,1,100);
-                    tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_eviltwin,tmp_str.length()-1); 
-                    
-                    msg = "Enter IFTTT event name for Deauthentication : ";
-                    tmp_str = get_string_input(msg,1,100);
-                    tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_deauth,tmp_str.length()-1); 
+
+                    if(operation_mode == OPERATION_DETECTION_MODE) //DETECTION_MODE
+                    {
+                        msg = "Enter IFTTT event name for Evil Twin: ";
+                        tmp_str = get_string_input(msg,1,100);
+                        tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_eviltwin,tmp_str.length()-1); 
+                        
+                        msg = "Enter IFTTT event name for Deauthentication : ";
+                        tmp_str = get_string_input(msg,1,100);
+                        tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_deauth,tmp_str.length()-1); 
+                    }
+                    else if(operation_mode == OPERATION_PROTECTION_MODE) //PROTECTION_MODE
+                    {
+                        msg = "Enter IFTTT event name for GeoFencing : ";
+                        tmp_str = get_string_input(msg,1,100);
+                        tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_geofence,tmp_str.length()-1); 
+                    }
                     
                     sensor_config.alert_mode = ALERT_STANDALONE;
                     alert_mode_set = true;
@@ -226,7 +269,7 @@ void config_sensor_manually()
     
         print_config();
         msg = " Do you want to save Yes[1], No[0] : ";
-        cho = get_int_input(msg,0,3);
+        cho = get_int_input(msg,0,1);
         if( cho == 1)
         {
             sensor_config.isConfigured = 1;   
@@ -247,6 +290,8 @@ void config_sensor_manually()
 
 void save_settings()
 {
+
+    uint8_t alert_mode = 1, operation_mode = 1;
 
     tmp_str =  server.arg("id");
     sensor_config.id = tmp_str.toInt();
@@ -270,24 +315,39 @@ void save_settings()
     tmp_str.toCharArray(sensor_config.connect_ap_info.PASSWORD,tmp_str.length() + 1);
 
     tmp_str =  server.arg("Alert_Mode");
-    
-    switch (tmp_str.toInt())
+    alert_mode = tmp_str.toInt();
+
+    tmp_str =  server.arg("Operation_Mode");
+    operation_mode = tmp_str.toInt();
+    sensor_config.operation_mode = operation_mode;
+
+    switch (alert_mode)
     {
         case 1: // Alert_Mode-IFTTT
             tmp_str =  server.arg("ifttt_key");
             tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_key,tmp_str.length() + 1); 
 
-            tmp_str =  server.arg("ifttt_eventName_eviltwin");
-            tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_eviltwin,tmp_str.length() + 1); 
-
-            tmp_str =  server.arg("ifttt_eventName_deauth");
-            tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_deauth,tmp_str.length() + 1); 
             sensor_config.alert_mode = ALERT_STANDALONE;
+
+            if(operation_mode == OPERATION_DETECTION_MODE)
+            {
+                tmp_str =  server.arg("ifttt_eventName_eviltwin");
+                tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_eviltwin,tmp_str.length() + 1); 
+
+                tmp_str =  server.arg("ifttt_eventName_deauth");
+                tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_deauth,tmp_str.length() + 1); 
+            }
+            else if(operation_mode == OPERATION_PROTECTION_MODE)
+            {
+                tmp_str =  server.arg("ifttt_eventName_geofence");
+                tmp_str.toCharArray(sensor_config.ifttt_info.ifttt_eventName_geofence,tmp_str.length() + 1);
+            }
 
         break;
         case 2: //Alert_Mode-SERVER
             tmp_str =  server.arg("server_ip");
             tmp_str.toCharArray(sensor_config.alert_server_info.server_ip,tmp_str.length() + 1);
+            
             sensor_config.alert_mode = ALERT_WIFI_SERVER;
         break;
     }
@@ -298,7 +358,7 @@ void save_settings()
     server.send ( 200, "text/html", "Saved");
     
     print_config();
-    //ESP.restart();
+    ESP.restart();
     
 }
 

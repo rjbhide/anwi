@@ -1,5 +1,5 @@
 #include <..\lib\global_vars.h>
-
+#include <..\lib\protection\geofence.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
@@ -44,31 +44,43 @@ void loop()
         serve_clients();
     }
 
-    curTime = millis();
-    if(curTime - prevTime >= SCAN_FREQ)
-    {    
-        if(pkt_info.is_deauth_detected)
-        {
-            if(deauth_pkt_counter >= MAX_DEAUTH_PKT)
+    if(sensor_config.operation_mode == OPERATION_DETECTION_MODE)
+    {
+        curTime = millis();
+        if(curTime - prevTime >= SCAN_FREQ)
+        {    
+            if(pkt_info.is_deauth_detected)
             {
-                pkt_info.attack_type = IS_DEAUTH_ATTACK;
+                if(deauth_pkt_counter >= MAX_DEAUTH_PKT)
+                {
+                    pkt_info.attack_type = IS_DEAUTH_ATTACK;
+                }
+                pkt_info.is_deauth_detected = false;
+                //pkt_info.is_disassoc_detected = false;
             }
-            pkt_info.is_deauth_detected = false;
-            //pkt_info.is_disassoc_detected = false;
+            hop_channel();
         }
-        hop_channel();
-    }
-    else
-    {
-        prevTime = curTime;
-        deauth_pkt_counter = 0;
-    }
+        else
+        {
+            prevTime = curTime;
+            deauth_pkt_counter = 0;
+        }
 
-    
-    if (pkt_info.attack_type == IS_EVILTWIN_ATTACK ||  pkt_info.attack_type == IS_DEAUTH_ATTACK )
+        
+        if (pkt_info.attack_type == IS_EVILTWIN_ATTACK ||  pkt_info.attack_type == IS_DEAUTH_ATTACK )
+        {
+            send_alert();
+            pkt_info.attack_type = -1;
+        }
+    }
+    //recalibrate geofence after regular interval
+    else if(sensor_config.operation_mode == OPERATION_PROTECTION_MODE)
     {
-        send_alert();
-        pkt_info.attack_type = -1;
+        recalibrate_transmission_power();
+        //HACK: remove below line. There need to be proper alert sending code.
+        // Also need to identify how to get MAC addresses of successfully connected devices.
+        Serial.printf("Connections blocked by geo-fence = %d\n", WiFi.softAPgetStationNum());
+        delay(5000);
     }
 }
 
@@ -76,22 +88,22 @@ void setup()
 {
     
     isConfiguredflag = get_configuration_status();
-    Serial.begin(115200);
+    Serial.begin(9600);
     
     if(Serial)
     {
         Serial.println("\nANWI - All New Wireless IDS\n ");
     
-            Serial.println("Press (d) to delete configuration");
-            delay(5000);
-    
-            if(Serial.read() == 'd')
-            {
-                Serial.println("Clearing Config");
-                clear_configuration();
-                ESP.restart();
-                Serial.println("Restart failed");
-            }
+        Serial.println("Press (d) to delete configuration");
+        delay(5000);
+
+        if(Serial.read() == 'd')
+        {
+            Serial.println("Clearing Config");
+            clear_configuration();
+            ESP.restart();
+            Serial.println("Restart failed");
+        }
         if(isConfiguredflag == 0)
         {
             Serial.println("No configuration found");
@@ -118,12 +130,20 @@ void setup()
             {
                 config_sensor_manually();
             }
-
+            
             curr_channel = 1;
 
             //get_config_settings();
-            Serial.println("ANWI Protection Activated..");
-            init_sniffing();
+            if(sensor_config.operation_mode == OPERATION_DETECTION_MODE)
+            {
+                Serial.println("ANWI Attack Detection Mode Activated..");
+                init_sniffing();
+            }
+            else if (sensor_config.operation_mode == OPERATION_PROTECTION_MODE)
+            {
+                 Serial.println("ANWI Protection Mode Activated..");
+                 setup_geofence(sensor_config.protect_ap_info.SSID);
+            }
         }
     }
 }
